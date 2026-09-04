@@ -2,8 +2,8 @@ services:
   deeperseeker:
     build: .
     container_name: deeperseeker
-    ports:
-      - "127.0.0.1:4000:4000"
+    # ports:
+    #   - "127.0.0.1:4000:4000"
     environment:
       - HOST=0.0.0.0
     env_file:
@@ -13,6 +13,22 @@ services:
       - deeperseeker_data:/app/data
     shm_size: "1gb"
     restart: unless-stopped
+    networks:
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik_network
+      # - traefik.http.routers.deeperseeker.rule=Host(`deeperseeker.${HOSTNAME}`)
+      - traefik.http.routers.deeperseeker.rule=HostRegexp(`^deeperseeker\.?srv[1-9](\-rgmtrv\.duckdns\.org|\.rgmtrv[1-9]?\.my\.id)$$`)
+      - traefik.http.routers.deeperseeker.entrypoints=web,websecure
+      # - traefik.http.routers.deeperseeker.tls=true
+      - traefik.http.routers.deeperseeker.service=deeperseeker
+      - traefik.http.services.deeperseeker.loadbalancer.server.port=4000
 
 volumes:
   deeperseeker_data:
+
+networks:
+  traefik:
+    name: traefik_network
+    external: true
