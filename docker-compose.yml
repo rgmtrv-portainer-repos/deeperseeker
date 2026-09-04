@@ -7,7 +7,7 @@ services:
     environment:
       - HOST=0.0.0.0
     env_file:
-      - path: .env
+      - path: stack.env
         required: false
     volumes:
       - deeperseeker_data:/app/data
