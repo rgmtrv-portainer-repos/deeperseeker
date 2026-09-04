@@ -13,6 +13,8 @@ services:
       - deeperseeker_data:/app/data
     shm_size: "1gb"
     restart: unless-stopped
+    healthcheck:
+      disable: true
     networks:
       - traefik
     labels:
