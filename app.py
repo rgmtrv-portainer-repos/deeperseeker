@@ -57,6 +57,14 @@ from plugin_helper import build_prompt, extract_and_upload_files, generate_signa
 logger = logging.getLogger("uvicorn.error")
 
 
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter(
+    "%(asctime)s - %(levelname)s - %(message)s"
+))
+
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
 def count_tok(text):
     return len(deepseek_tokenizer.ds_token.encode(text))
 
