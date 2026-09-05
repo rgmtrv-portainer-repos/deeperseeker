@@ -15,6 +15,9 @@ import deepseek_tokenizer
 import wasmtime
 from playwright.async_api import async_playwright
 
+import logging
+logger = logging.getLogger("uvicorn.error")
+
 wasm_path = "wasm/deepseek_pow_solver.wasm"
 _session = None
 _db = "deeperseeker.db"
