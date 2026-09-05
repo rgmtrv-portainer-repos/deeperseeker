@@ -853,12 +853,37 @@ async def upload_file(file_bytes, file_name, file_content_type, auth_token):
         "content-type": f"multipart/form-data; boundary={boundary.decode('utf-8')}",
         "x-file-size": str(file_size),
     })
+
     async with session.post(url, data=reconstructed_body, cookies=cookie, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as response:
-        resp_json = await response.json()
-    file_id = resp_json["data"]["biz_data"]["id"]
+        raw_text = await response.text()
+        try:
+            resp_json = json.loads(raw_text)
+        except Exception:
+            logger.error("upload_file: non-JSON response (status=%s): %s", response.status, raw_text[:500])
+            raise Exception(f"HTTP {response.status}: upload returned non-JSON response")
+
+        if response.status != 200 or not isinstance(resp_json, dict) or not resp_json.get("data"):
+            logger.error(
+                "upload_file: upload failed (http_status=%s, body=%s)",
+                response.status, resp_json,
+            )
+            code = resp_json.get("code") if isinstance(resp_json, dict) else None
+            msg = resp_json.get("msg") if isinstance(resp_json, dict) else None
+            # Treat auth/pow/quota-shaped failures as retryable HTTP errors so
+            # handle_chat's existing retry + token-switch logic catches them.
+            if response.status in (401, 403, 429) or code in (40001, 40003, 40100):
+                raise Exception(f"HTTP {response.status or 401}: upload rejected ({msg or code})")
+            raise Exception(f"HTTP {response.status or 500}: upload failed ({msg or resp_json})")
+
+    biz_data = resp_json["data"].get("biz_data") if isinstance(resp_json["data"], dict) else None
+    if not biz_data or "id" not in biz_data:
+        logger.error("upload_file: missing biz_data/id in response: %s", resp_json)
+        raise Exception(f"HTTP 500: upload response missing file id ({resp_json})")
+
+    file_id = biz_data["id"]
     yield ("uploaded", file_id)
-    js_data = resp_json["data"]["biz_data"]
-    status = js_data["status"]
+    js_data = biz_data
+    status = js_data.get("status")
     headers = get_headers(auth_token)
     deadline = time.time() + 300
     while status in ["PENDING", "PARSING"] and time.time() < deadline:
@@ -868,8 +893,18 @@ async def upload_file(file_bytes, file_name, file_content_type, auth_token):
             "https://chat.deepseek.com/api/v0/file/fetch_files?file_ids=" + file_id,
             headers=headers, cookies=cookie, timeout=aiohttp.ClientTimeout(total=30),
         ) as resp:
-            js_data = (await resp.json())["data"]["biz_data"]["files"][0]
-        status = js_data["status"]
+            poll_json = await resp.json()
+
+        poll_data = poll_json.get("data") if isinstance(poll_json, dict) else None
+        files = poll_data.get("biz_data", {}).get("files") if poll_data else None
+        if not files:
+            logger.error("upload_file: fetch_files returned no files for id=%s: %s", file_id, poll_json)
+            yield ("error", file_id)
+            return
+
+        js_data = files[0]
+        status = js_data.get("status")
+
     if status == "SUCCESS" or (status == "CONTENT_EMPTY" and str(file_content_type).startswith("image/")):
         tp_data = datetime.fromtimestamp(js_data["updated_at"], timezone.utc)
         yield ("success", {
@@ -879,6 +914,7 @@ async def upload_file(file_bytes, file_name, file_content_type, auth_token):
             "anthropic_timestamp": tp_data.strftime("%Y-%m-%dT%H:%M:%SZ"),
         })
     else:
+        logger.warning("upload_file: final status=%s for file_id=%s (js_data=%s)", status, file_id, js_data)
         yield ("error", file_id)
 
 
